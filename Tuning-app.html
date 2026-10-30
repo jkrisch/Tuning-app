@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14110f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Saitenstimmer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@600;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: eine Bildschirmseite – Instrumentwahl oben, grosse Note + Cent-Skala in der Mitte, Saitentasten unten */
+:root{
+  --bg:#14110f; --panel:#1f1a17; --line:#3a312b; --fg:#f1e9df; --muted:#a3968a;
+  --accent:#d9a441; --ok:#6fcf8e; --warn:#e2734f;
+  --display:"Shippori Mincho",Georgia,serif;
+  --body:"IBM Plex Sans",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.4 var(--body);
+  padding:env(safe-area-inset-top,0px) max(16px,env(safe-area-inset-right,0px)) env(safe-area-inset-bottom,0px) max(16px,env(safe-area-inset-left,0px));
+  display:flex;justify-content:center;-webkit-tap-highlight-color:transparent;user-select:none}
+.app{width:100%;max-width:520px;display:flex;flex-direction:column;gap:18px;padding-block:16px 20px;min-height:100%}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+h1{font:800 22px/1 var(--display);margin:0;letter-spacing:.02em}
+.ref{font:500 13px var(--mono);color:var(--muted);display:flex;align-items:center;gap:6px}
+.ref button{width:30px;height:30px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:500 16px var(--mono)}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px;gap:4px}
+.seg button{border:0;border-radius:9px;padding:10px 4px;background:transparent;color:var(--muted);font:600 14px var(--body)}
+.seg button[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+.opts{display:flex;gap:10px;flex-wrap:wrap}
+.opts[hidden]{display:none}
+label.sel{flex:1 1 140px;display:flex;flex-direction:column;gap:4px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+select{appearance:none;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:500 15px var(--body)}
+.stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;min-height:300px}
+.note{font:800 clamp(96px,30vw,150px)/.9 var(--display);transition:color .15s;display:flex;align-items:flex-start}
+.note sup{font:500 .26em var(--mono);margin:.3em 0 0 .1em;color:var(--muted)}
+.note.ok{color:var(--ok)}
+.target{font:500 13px var(--mono);color:var(--muted);min-height:1.4em;text-align:center}
+.target b{color:var(--fg);font-weight:500}
+.meter{width:100%;position:relative;height:84px}
+.meter svg{width:100%;height:100%;display:block;overflow:visible}
+.tick{stroke:var(--line)} .tick.mid{stroke:var(--muted)}
+.lbl{fill:var(--muted);font:11px var(--mono)}
+.zone{fill:var(--ok);opacity:.14}
+#needle{transition:transform .09s linear}
+#needle line{stroke:var(--accent);stroke-width:3;stroke-linecap:round}
+#needle circle{fill:var(--accent)}
+.ok #needle line{stroke:var(--ok)} .ok #needle circle{fill:var(--ok)}
+.read{display:flex;gap:22px;font:500 15px var(--mono);font-variant-numeric:tabular-nums;color:var(--muted)}
+.read span b{color:var(--fg);font-weight:500}
+.dir{font:600 14px var(--body);min-height:1.4em;color:var(--warn)}
+.dir.ok{color:var(--ok)}
+.strings{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:8px}
+.str{border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:12px;padding:10px 2px 8px;display:flex;flex-direction:column;align-items:center;gap:2px;font:inherit}
+.str .n{font:800 22px/1 var(--display)}
+.str .o{font:11px var(--mono);color:var(--muted)}
+.str.active{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.str.hit .n{color:var(--ok)}
+.foot{display:flex;gap:10px;align-items:center}
+.foot .mode{flex:1;font-size:12px;color:var(--muted)}
+.btn{border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:10px;padding:9px 12px;font:600 13px var(--body)}
+.btn[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+.start{position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 92%,transparent);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center;z-index:5}
+.start[hidden]{display:none}
+.start button{background:var(--accent);color:#1a1206;border:0;border-radius:999px;padding:16px 32px;font:600 17px var(--body)}
+.start p{color:var(--muted);max-width:30ch;margin:0}
+.err{color:var(--warn)}
+button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){#needle,.note{transition:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Saitenstimmer</h1>
+    <div class="ref" aria-label="Kammerton">
+      <button id="refDown" aria-label="Kammerton tiefer">−</button>
+      <span>a¹ = <span id="refVal">440</span> Hz</span>
+      <button id="refUp" aria-label="Kammerton höher">+</button>
+    </div>
+  </header>
+
+  <div class="seg" role="group" aria-label="Instrument">
+    <button data-inst="shamisen" aria-pressed="true">Shamisen</button>
+    <button data-inst="violin" aria-pressed="false">Geige</button>
+    <button data-inst="guitar" aria-pressed="false">Gitarre</button>
+  </div>
+
+  <div class="opts" id="shamiOpts">
+    <label class="sel">Chōshi
+      <select id="choshi">
+        <option value="honchoshi">Honchōshi (1–4–8)</option>
+        <option value="niagari">Niagari (1–5–8)</option>
+        <option value="sansagari">Sansagari (1–4–7)</option>
+      </select>
+    </label>
+    <label class="sel">Grundton Ichi-no-ito
+      <select id="base"></select>
+    </label>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="note" id="note">–</div>
+    <div class="target" id="target">Saite anschlagen</div>
+    <div class="meter">
+      <svg viewBox="-160 -10 320 90" aria-hidden="true">
+        <rect class="zone" x="-16" y="0" width="32" height="44" rx="3"/>
+        <g id="ticks"></g>
+        <g id="needle"><line x1="0" y1="-4" x2="0" y2="50"/><circle cx="0" cy="54" r="5"/></g>
+      </svg>
+    </div>
+    <div class="dir" id="dir">&nbsp;</div>
+    <div class="read"><span><b id="hz">—</b> Hz</span><span><b id="cents">—</b> ct</span></div>
+  </div>
+
+  <div class="strings" id="strings"></div>
+  <div class="foot">
+    <div class="mode" id="modeTxt">Automatisch: nächste Saite wird erkannt. Taste antippen, um eine Saite festzuhalten.</div>
+    <button class="btn" id="toneBtn" aria-pressed="false">Referenzton</button>
+  </div>
+</div>
+
+<div class="start" id="start">
+  <h1 style="font-size:34px">Saitenstimmer</h1>
+  <p>Shamisen, Geige und Gitarre. Braucht Zugriff aufs Mikrofon – die Audiodaten bleiben auf dem Gerät.</p>
+  <button id="startBtn">Mikrofon starten</button>
+  <p class="err" id="err"></p>
+</div>
+
+<script>
+(() => {
+  const NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','B','H']; // deutsche Schreibweise: B = Bb, H = B
+  const midiName = m => NAMES[((m % 12) + 12) % 12];
+  const midiOct = m => Math.floor(m / 12) - 1;
+
+  // MIDI-Nummern der Saiten, von tief nach hoch
+  const PRESETS = {
+    violin: [55, 62, 69, 76],              // G3 D4 A4 E5
+    guitar: [40, 45, 50, 55, 59, 64],      // E2 A2 D3 G3 H3 E4
+  };
+  const CHOSHI = { honchoshi:[0,5,12], niagari:[0,7,12], sansagari:[0,5,10] };
+
+  const st = {
+    inst: 'shamisen', choshi: 'honchoshi', base: 48, // C3
+    ref: 440, locked: null, tone: false
+  };
+  try { Object.assign(st, JSON.parse(localStorage.getItem('stimmer') || '{}'), {locked:null, tone:false}); } catch(e) {}
+  const save = () => { try { localStorage.setItem('stimmer', JSON.stringify({inst:st.inst,choshi:st.choshi,base:st.base,ref:st.ref})); } catch(e){} };
+
+  const $ = id => document.getElementById(id);
+  const freqOf = m => st.ref * Math.pow(2, (m - 69) / 12);
+  const strings = () => st.inst === 'shamisen' ? CHOSHI[st.choshi].map(i => st.base + i) : PRESETS[st.inst];
+
+  // ---------- UI-Aufbau ----------
+  const baseSel = $('base');
+  for (let m = 45; m <= 53; m++) { // A2 … F3
+    const o = document.createElement('option'); o.value = m; o.textContent = midiName(m) + midiOct(m);
+    baseSel.appendChild(o);
+  }
+  const ticks = $('ticks');
+  for (let c = -50; c <= 50; c += 5) {
+    const x = c * 3, big = c % 25 === 0;
+    ticks.insertAdjacentHTML('beforeend',
+      `<line class="tick${c===0?' mid':''}" x1="${x}" x2="${x}" y1="${big?0:10}" y2="${big?44:34}" stroke-width="${c===0?2:1}"/>` +
+      (big ? `<text class="lbl" x="${x}" y="72" text-anchor="middle">${c>0?'+':''}${c}</text>` : ''));
+  }
+
+  function renderControls() {
+    document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.inst === st.inst));
+    $('shamiOpts').hidden = st.inst !== 'shamisen';
+    $('choshi').value = st.choshi; baseSel.value = st.base; $('refVal').textContent = st.ref;
+    const box = $('strings'); box.innerHTML = '';
+    const labels = st.inst === 'shamisen' ? ['Ichi','Ni','San'] : null;
+    strings().forEach((m, i) => {
+      const b = document.createElement('button');
+      b.className = 'str' + (st.locked === m ? ' active' : '');
+      b.dataset.midi = m;
+      b.innerHTML = `<span class="n">${midiName(m)}</span><span class="o">${labels ? labels[i] : midiName(m)+midiOct(m)}</span>`;
+      b.onclick = () => { st.locked = st.locked === m ? null : m; renderControls(); updateTone(); };
+      box.appendChild(b);
+    });
+    $('modeTxt').textContent = st.locked == null
+      ? 'Automatisch: nächste Saite wird erkannt. Taste antippen, um eine Saite festzuhalten.'
+      : `Festgehalten: ${midiName(st.locked)}${midiOct(st.locked)} (${freqOf(st.locked).toFixed(1)} Hz). Nochmals tippen für Automatik.`;
+    $('toneBtn').setAttribute('aria-pressed', st.tone);
+  }
+
+  document.querySelectorAll('.seg button').forEach(b => b.onclick = () => { st.inst = b.dataset.inst; st.locked = null; save(); renderControls(); updateTone(); });
+  $('choshi').onchange = e => { st.choshi = e.target.value; st.locked = null; save(); renderControls(); };
+  baseSel.onchange = e => { st.base = +e.target.value; st.locked = null; save(); renderControls(); };
+  $('refDown').onclick = () => { st.ref = Math.max(430, st.ref - 1); save(); renderControls(); updateTone(); };
+  $('refUp').onclick = () => { st.ref = Math.min(450, st.ref + 1); save(); renderControls(); updateTone(); };
+
+  // ---------- Audio ----------
+  let ctx, analyser, buf, osc, gain;
+
+  function updateTone() {
+    if (!ctx) return;
+    if (st.tone) {
+      const m = st.locked ?? strings()[0];
+      if (!osc) {
+        osc = ctx.createOscillator(); osc.type = 'triangle';
+        gain = ctx.createGain(); gain.gain.value = 0;
+        osc.connect(gain).connect(ctx.destination); osc.start();
+        gain.gain.setTargetAtTime(0.18, ctx.currentTime, 0.03);
+      }
+      osc.frequency.setTargetAtTime(freqOf(m), ctx.currentTime, 0.01);
+    } else if (osc) {
+      gain.gain.setTargetAtTime(0, ctx.currentTime, 0.03);
+      const o = osc; osc = null; setTimeout(() => o.stop(), 200);
+    }
+  }
+  $('toneBtn').onclick = () => { st.tone = !st.tone; renderControls(); updateTone(); };
+
+  async function start() {
+    $('err').textContent = '';
+    if (!navigator.mediaDevices?.getUserMedia) {
+      $('err').textContent = 'Kein Mikrofonzugriff möglich. Die Seite muss über https:// (oder localhost) geöffnet werden.';
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false } });
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      await ctx.resume();
+      const src = ctx.createMediaStreamSource(stream);
+      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 55;
+      analyser = ctx.createAnalyser(); analyser.fftSize = 4096;
+      src.connect(hp).connect(analyser);
+      buf = new Float32Array(analyser.fftSize);
+      $('start').hidden = true;
+      try { await navigator.wakeLock?.request('screen'); } catch(e) {}
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) navigator.wakeLock?.request('screen').catch(()=>{}); });
+      loop();
+    } catch (e) {
+      $('err').textContent = 'Mikrofon wurde nicht freigegeben. Bitte in den Browser-Einstellungen erlauben und neu laden.';
+    }
+  }
+  $('startBtn').onclick = start;
+
+  // YIN-Tonhöhenerkennung
+  let d = null;
+  function yin(x, sr) {
+    const W = x.length >> 1;
+    const tMin = Math.floor(sr / 1500), tMax = Math.min(W - 1, Math.floor(sr / 60));
+    if (!d || d.length !== tMax + 1) d = new Float32Array(tMax + 1);
+    d[0] = 1; let run = 0;
+    for (let t = 1; t <= tMax; t++) {
+      let s = 0;
+      for (let i = 0; i < W; i++) { const v = x[i] - x[i + t]; s += v * v; }
+      run += s; d[t] = run ? s * t / run : 1;
+    }
+    let tau = -1;
+    for (let t = tMin; t <= tMax; t++) {
+      if (d[t] < 0.12) { while (t + 1 <= tMax && d[t + 1] < d[t]) t++; tau = t; break; }
+    }
+    if (tau < 0) {
+      let best = 1; for (let t = tMin; t <= tMax; t++) if (d[t] < best) { best = d[t]; tau = t; }
+      if (best > 0.25) return -1;
+    }
+    if (tau > 0 && tau < tMax) {
+      const a = d[tau - 1], b = d[tau], c = d[tau + 1], den = a + c - 2 * b;
+      if (den) tau += (a - c) / (2 * den);
+    }
+    return sr / tau;
+  }
+
+  const hist = [];
+  let silentFrames = 0, last = 0;
+  function loop(now = 0) {
+    requestAnimationFrame(loop);
+    if (now - last < 45) return; last = now;
+    analyser.getFloatTimeDomainData(buf);
+    let rms = 0; for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
+    rms = Math.sqrt(rms / buf.length);
+    const f = rms > 0.008 ? yin(buf, ctx.sampleRate) : -1;
+    if (f > 0) {
+      hist.push(f); if (hist.length > 5) hist.shift();
+      silentFrames = 0;
+      const med = [...hist].sort((a, b) => a - b)[hist.length >> 1];
+      show(med);
+    } else if (++silentFrames > 25) { hist.length = 0; idle(); }
+  }
+
+  let shownCents = 0;
+  function show(f) {
+    const midiF = 69 + 12 * Math.log2(f / st.ref);
+    let target;
+    if (st.locked != null) target = st.locked;
+    else {
+      const list = strings();
+      target = list.reduce((a, b) => Math.abs(b - midiF) < Math.abs(a - midiF) ? b : a);
+      if (Math.abs(target - midiF) > 2.5) target = Math.round(midiF); // weit weg: chromatisch
+    }
+    const cents = (midiF - target) * 100;
+    const shown = Math.round(midiF);
+    shownCents += (cents - shownCents) * 0.5;
+    const ok = Math.abs(cents) < 5;
+
+    const noteEl = $('note');
+    noteEl.innerHTML = `${midiName(shown)}<sup>${midiOct(shown)}</sup>`;
+    noteEl.classList.toggle('ok', ok && shown === target);
+    $('stage').classList.toggle('ok', ok);
+    $('needle').style.transform = `translateX(${Math.max(-50, Math.min(50, shownCents)) * 3}px)`;
+    $('hz').textContent = f.toFixed(1);
+    $('cents').textContent = (cents > 0 ? '+' : '') + Math.round(cents);
+    $('target').innerHTML = `Ziel <b>${midiName(target)}${midiOct(target)}</b> · ${freqOf(target).toFixed(1)} Hz`;
+    const dir = $('dir');
+    dir.className = 'dir' + (ok ? ' ok' : '');
+    dir.textContent = ok ? 'Gestimmt' : (cents < 0 ? 'zu tief – höher stimmen' : 'zu hoch – tiefer stimmen');
+    document.querySelectorAll('.str').forEach(b => b.classList.toggle('hit', +b.dataset.midi === target && ok));
+  }
+  function idle() {
+    $('note').textContent = '–'; $('note').classList.remove('ok'); $('stage').classList.remove('ok');
+    $('target').textContent = 'Saite anschlagen'; $('dir').innerHTML = '&nbsp;';
+    $('hz').textContent = '—'; $('cents').textContent = '—';
+    $('needle').style.transform = 'translateX(0)'; shownCents = 0;
+    document.querySelectorAll('.str').forEach(b => b.classList.remove('hit'));
+  }
+
+  renderControls();
+})();
+</script>
+</body>
+</html>
