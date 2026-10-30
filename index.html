@@ -198,20 +198,104 @@ button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outlin
   // ---------- Audio ----------
   let ctx, analyser, buf, osc, gain;
 
+  // ---------- Referenzklänge (physikalisch modelliert) ----------
+  // Gezupfte Saite: Karplus-Strong mit fraktionaler Verzögerung, damit die Tonhöhe exakt stimmt
+  function pluckBuffer(f, kind) {
+    const sr = ctx.sampleRate, dur = kind === 'shamisen' ? 2.2 : 3.2;
+    const len = Math.floor(sr * dur), y = new Float32Array(len);
+    const P = sr / f - 0.5;                       // Mittelungsfilter bringt 0.5 Samples Verzögerung
+    const N = Math.ceil(P) + 2;
+    // Anregung: Gitarre weich (gefiltert, Anschlag bei ~1/5 der Saite), Shamisen hart (Bachi)
+    let lp = 0;
+    const exc = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const r = Math.random() * 2 - 1;
+      lp += (r - lp) * (kind === 'shamisen' ? 0.85 : 0.35);
+      exc[i] = lp;
+    }
+    const pos = Math.max(1, Math.round(N / (kind === 'shamisen' ? 9 : 5)));
+    for (let i = N - 1; i >= pos; i--) exc[i] -= exc[i - pos]; // Kammfilter = Anschlagposition
+    const decay = kind === 'shamisen' ? 0.9965 : 0.9992;
+    const frac = P - Math.floor(P), ip = Math.floor(P);
+    for (let n = 0; n < len; n++) {
+      if (n < N) { y[n] = exc[n]; continue; }
+      const a = y[n - ip], b = y[n - ip - 1];
+      const d = a + (b - a) * frac;               // Lesen bei n − P
+      const e = y[n - ip - 1] + (y[n - ip - 2] - y[n - ip - 1]) * frac;
+      y[n] = decay * 0.5 * (d + e);
+    }
+    if (kind === 'shamisen') {
+      // Sawari: leichtes Schnarren durch weiche Begrenzung + kurzer Bachi-Klick
+      for (let n = 0; n < len; n++) y[n] = Math.tanh(y[n] * 2.2) * 0.6;
+      for (let n = 0; n < sr * 0.012; n++) y[n] += (Math.random() * 2 - 1) * 0.5 * (1 - n / (sr * 0.012));
+    }
+    let peak = 0; for (const v of y) peak = Math.max(peak, Math.abs(v));
+    const out = ctx.createBuffer(1, len, sr), ch = out.getChannelData(0);
+    const fade = Math.floor(sr * 0.05);
+    for (let n = 0; n < len; n++) ch[n] = (y[n] / peak) * (n > len - fade ? (len - n) / fade : 1);
+    return out;
+  }
+
+  // Gestrichene Saite: Sägezahn (Helmholtz-Bewegung) + Korpus-Resonanzen + Bogenrauschen
+  function bowStart(f) {
+    const t = ctx.currentTime, out = ctx.createGain();
+    out.gain.setValueAtTime(0, t);
+    out.gain.linearRampToValueAtTime(0.32, t + 0.18);
+    const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f;
+    const lfo = ctx.createOscillator(), lfoG = ctx.createGain();   // dezentes Vibrato, setzt verzögert ein
+    lfo.frequency.value = 5.2; lfoG.gain.setValueAtTime(0, t); lfoG.gain.linearRampToValueAtTime(f * 0.0012, t + 1.2);
+    lfo.connect(lfoG).connect(o.frequency);
+    let node = o;
+    for (const [fr, q, g] of [[280, 2, 6], [550, 3, 4], [1100, 2, 5], [2600, 1.5, 7]]) {
+      const pk = ctx.createBiquadFilter(); pk.type = 'peaking'; pk.frequency.value = fr; pk.Q.value = q; pk.gain.value = g;
+      node.connect(pk); node = pk;
+    }
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 5200;
+    node.connect(lp).connect(out);
+    const nb = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), nd = nb.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+    const ns = ctx.createBufferSource(); ns.buffer = nb; ns.loop = true;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 3000; bp.Q.value = 0.8;
+    const ng = ctx.createGain(); ng.gain.value = 0.025;
+    ns.connect(bp).connect(ng).connect(out);
+    out.connect(ctx.destination);
+    o.start(); lfo.start(); ns.start();
+    return { stop() {
+      const t2 = ctx.currentTime;
+      out.gain.cancelScheduledValues(t2); out.gain.setTargetAtTime(0, t2, 0.06);
+      setTimeout(() => { o.stop(); lfo.stop(); ns.stop(); out.disconnect(); }, 400);
+    }};
+  }
+
+  let voice = null, repeatTimer = null, playingKey = '';
+  const bufCache = new Map();
+  function stopVoice() {
+    clearInterval(repeatTimer); repeatTimer = null;
+    if (voice) { voice.stop(); voice = null; }
+    playingKey = '';
+  }
+  function pluckOnce(f, kind) {
+    const key = kind + f.toFixed(2);
+    if (!bufCache.has(key)) bufCache.set(key, pluckBuffer(f, kind));
+    const src = ctx.createBufferSource(), g = ctx.createGain();
+    src.buffer = bufCache.get(key); g.gain.value = 0.55;
+    src.connect(g).connect(ctx.destination); src.start();
+    const prev = voice;
+    voice = { stop() { g.gain.setTargetAtTime(0, ctx.currentTime, 0.04); setTimeout(() => src.stop(), 300); } };
+    if (prev) prev.stop();
+  }
   function updateTone() {
     if (!ctx) return;
-    if (st.tone) {
-      const m = st.locked ?? strings()[0];
-      if (!osc) {
-        osc = ctx.createOscillator(); osc.type = 'triangle';
-        gain = ctx.createGain(); gain.gain.value = 0;
-        osc.connect(gain).connect(ctx.destination); osc.start();
-        gain.gain.setTargetAtTime(0.18, ctx.currentTime, 0.03);
-      }
-      osc.frequency.setTargetAtTime(freqOf(m), ctx.currentTime, 0.01);
-    } else if (osc) {
-      gain.gain.setTargetAtTime(0, ctx.currentTime, 0.03);
-      const o = osc; osc = null; setTimeout(() => o.stop(), 200);
+    if (!st.tone) { stopVoice(); return; }
+    const m = st.locked ?? strings()[0], f = freqOf(m);
+    const key = st.inst + f.toFixed(2);
+    if (key === playingKey) return;
+    stopVoice(); playingKey = key;
+    if (st.inst === 'violin') voice = bowStart(f);
+    else {
+      const kind = st.inst;
+      pluckOnce(f, kind);
+      repeatTimer = setInterval(() => pluckOnce(f, kind), kind === 'shamisen' ? 2000 : 2800);
     }
   }
   $('toneBtn').onclick = () => { st.tone = !st.tone; renderControls(); updateTone(); };
